@@ -149,7 +149,7 @@ impl DocParser {
         // Class import path (if needed)
         if let Some(import_path) = class.import_path {
             md.push_str("Import with `import ");
-            md.push_str(&import_path);
+            md.push_str(&class.name);
             md.push_str(" from ");
             md.push_str(&import_path);
             md.push_str(";`\n\n");
