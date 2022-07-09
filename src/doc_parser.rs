@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use serde::Deserialize;
 use serde_json::Value;
@@ -71,7 +72,13 @@ impl DocParser {
 
     pub fn parse_extensions(&self) -> String {
         let extensions = self.json["extensions"].as_object().unwrap();
-        let mut iter = extensions.iter().peekable();
+
+        let mut map = BTreeMap::new();
+        for (string, value) in extensions {
+            map.insert(string, value);
+        }
+
+        let mut iter = map.iter().peekable();
         let mut md = String::new();
 
         while let Some(extension) = iter.next() {
@@ -89,7 +96,13 @@ impl DocParser {
 
     pub fn parse_classes(&self) -> String {
         let classes = self.json["classes"].as_object().unwrap();
-        let mut iter = classes.values().peekable();
+
+        let mut map = BTreeMap::new();
+        for (string, value) in classes {
+            map.insert(string, value);
+        }
+
+        let mut iter = map.values().peekable();
         let mut md = String::new();
 
         while let Some(class) = iter.next() {
@@ -112,8 +125,8 @@ impl DocParser {
 
         for i in 0..functions.len() {
             let f: &Value = &functions[i];
-            let function = serde_json::from_value(f.clone()).unwrap();
-            let func_s = DocParser::add_function(None, function);
+            let function: Function = serde_json::from_value(f.clone()).unwrap();
+            let func_s = DocParser::add_function(None, &function);
             if func_s.is_none() {
                 continue;
             }
@@ -161,20 +174,20 @@ impl DocParser {
         md.push_str("Fully Documented.\n\n");
 
         // Static members of the class
-        if let Some(statics) = class.static_members {
+        if let Some(mut statics) = class.static_members {
             if !statics.is_empty() {
                 md.push_str("## Static Members\n\n");
-                DocParser::add_member(&mut md, &class.name, &statics);
+                DocParser::add_member(&mut md, &class.name, &mut statics);
                 md.push('\n');
             }
         }
 
         // Instance members (wrappers)
-        if let Some(members) = class.members {
+        if let Some(mut members) = class.members {
             if !members.is_empty() {
                 let member_class = String::new() + "<" + &class.name + ">";
                 md.push_str("## Members\n\n");
-                DocParser::add_member(&mut md, &member_class, &members);
+                DocParser::add_member(&mut md, &member_class, &mut members);
                 md.push('\n');
             }
         }
@@ -183,7 +196,9 @@ impl DocParser {
         if let Some(constructors) = class.constructors {
             if !constructors.is_empty() {
                 md.push_str("## Constructors\n\n");
+
                 let mut iter = constructors.into_iter().peekable();
+
                 while let Some(constructor) = iter.next() {
                     md.push_str("### `new ");
                     md.push_str(&class.name);
@@ -212,7 +227,8 @@ impl DocParser {
             if !methods.is_empty() {
                 md.push_str("## Methods\n\n");
                 let member_class = String::new() + "<" + &class.name + ">";
-                let mut iter = methods.into_iter().peekable();
+                let map = DocParser::order_functions(methods);
+                let mut iter = map.values().into_iter().peekable();
                 while let Some(value) = iter.next() {
                     let func_s = DocParser::add_function(Some(&member_class), value);
                     if func_s.is_none() {
@@ -233,7 +249,8 @@ impl DocParser {
         if let Some(static_methods) = class.static_methods {
             if !static_methods.is_empty() {
                 md.push_str("## Static Methods\n\n");
-                let mut iter = static_methods.into_iter().peekable();
+                let map = DocParser::order_functions(static_methods);
+                let mut iter = map.values().into_iter().peekable();
                 while let Some(value) = iter.next() {
                     let func_s = DocParser::add_function(Some(&class.name), value);
                     if func_s.is_none() {
@@ -252,7 +269,15 @@ impl DocParser {
         md
     }
 
-    fn add_function(class_op: Option<&str>, function: Function) -> Option<String> {
+    fn order_functions(functions: Vec<Function>) -> BTreeMap<String, Function> {
+        let mut map = BTreeMap::new();
+        for function in functions {
+            map.insert(function.name.to_string(), function);
+        }
+        map
+    }
+
+    fn add_function(class_op: Option<&str>, function: &Function) -> Option<String> {
         // Every function should have an example
         if function.examples.is_none() {
             return None;
@@ -279,7 +304,7 @@ impl DocParser {
             DocParser::add_from_string_array(&mut md, deprecation);
         }
 
-        DocParser::add_description(&mut md, &function.desc.unwrap());
+        DocParser::add_description(&mut md, &function.desc.as_ref().unwrap());
 
         if let Some(params) = &function.params {
             DocParser::add_params(&mut md, params);
@@ -302,7 +327,7 @@ impl DocParser {
             }
         }
 
-        DocParser::add_examples(&mut md, &function.examples.unwrap());
+        DocParser::add_examples(&mut md, &function.examples.as_ref().unwrap());
 
         Some(md)
     }
@@ -318,7 +343,11 @@ impl DocParser {
         }
     }
 
-    fn add_member(md: &mut String, class_name: &str, members: &Vec<Member>) {
+    fn add_member(md: &mut String, class_name: &str, members: &mut Vec<Member>) {
+        members.sort_by(|a, b| {
+            a.name.cmp(&b.name)
+        });
+
         for member in members {
             // Every member should have this field, otherwise invalid
             if member.assignable.is_none() {
